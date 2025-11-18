@@ -3,5 +3,5 @@ project(batteryLoggerCpp)
 
 set(CMAKE_CXX_STANDARD 20)
 
-add_executable(batteryLoggerCpp main.cpp)
+add_executable(batteryLoggerCpp WIN32 main.cpp)
 target_link_libraries(batteryLoggerCpp PRIVATE iphlpapi)
