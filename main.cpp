@@ -175,7 +175,7 @@ void logTask(const std::string &machineId) {
         return;
     }
 
-    if (!fileExists) {
+    if (!fileExists || ftell(fp) == 0) {
         fprintf(fp, "time,plugged,percent,machine_id\n");
     }
 
