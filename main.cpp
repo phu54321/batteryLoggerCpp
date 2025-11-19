@@ -142,13 +142,19 @@ bool getBatteryStatus(bool &plugged, int &percent) {
 }
 
 // Expand "~" to user home directory (rough equivalent of os.path.expanduser("~"))
-std::string getHomeDir() {
-    const char *userProfile = std::getenv("USERPROFILE");
+std::wstring getHomeDir() {
+    const wchar_t *userProfile = _wgetenv(L"USERPROFILE");
     if (userProfile && *userProfile) {
         return userProfile;
     }
     // Fallback to current directory
-    return ".";
+    return L".";
+}
+
+std::wstring getLogPath() {
+    std::wstring home = getHomeDir();
+    std::wstring path = home + L"\\batteryLog.csv";
+    return path;
 }
 
 void logTask(const std::string &machineId) {
@@ -160,27 +166,27 @@ void logTask(const std::string &machineId) {
     }
 
     // CPU process info currently disabled, same as the Python code.
-    std::string home = getHomeDir();
-    std::string path = home + "\\batteryLog.csv";
-
+    auto logPath = getLogPath();
     namespace fs = std::filesystem;
-    bool fileExists = fs::exists(path);
+    bool fileExists = fs::exists(logPath);
 
-    std::ofstream ofs(path, std::ios::app);
-    if (!ofs.is_open()) {
+    auto fp = _wfopen(logPath.c_str(), L"a");
+    if (!fp) {
         return;
     }
 
     if (!fileExists) {
-        ofs << "time,plugged,percent,machine_id\n";
+        fprintf(fp, "time,plugged,percent,machine_id\n");
     }
 
-    ofs << getCurrentIsoTime() << ','
-            << (plugged ? "True" : "False") << ','
-            << percent << ','
-            << machineId
-            << "\n";
-    ofs.flush();
+    fprintf(fp, "%s,%s,%s,%s\n",
+            getCurrentIsoTime().c_str(),
+            plugged ? "True" : "False",
+            std::to_string(percent).c_str(),
+            machineId.c_str()
+    );
+
+    fclose(fp);
 }
 
 // Single-instance guard using a named mutex (similar to tendo.singleton)
@@ -212,6 +218,8 @@ UINT g_wmTaskbarCreated = 0;
 #define TIMER_LOG 0x1525
 #define WM_TRAYICON (WM_USER + 1)
 #define IDM_QUIT 1001
+#define IDM_OPENLOG 1002
+#define IDM_ABOUT 1003
 
 void AddTrayIcon(HWND hwnd, HINSTANCE hInstance) {
     NOTIFYICONDATAW nid = {};
@@ -237,7 +245,8 @@ void ShowContextMenu(HWND hwnd) {
     POINT pt;
     GetCursorPos(&pt);
     HMENU hMenu = CreatePopupMenu();
-    AppendMenuW(hMenu, MF_STRING | MF_GRAYED, 0, L"batteryLogger");
+    AppendMenuW(hMenu, MF_STRING, IDM_ABOUT, L"About");
+    AppendMenuW(hMenu, MF_STRING, IDM_OPENLOG, L"Open battery log");
     AppendMenuW(hMenu, MF_STRING, IDM_QUIT, L"Quit");
 
     SetForegroundWindow(hwnd);
@@ -247,16 +256,53 @@ void ShowContextMenu(HWND hwnd) {
     DestroyMenu(hMenu);
 }
 
+HWND g_aboutDlg = nullptr;
+
+static INT_PTR CALLBACK AboutDlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    switch (uMsg) {
+        case WM_INITDIALOG: {
+            auto hInstance = (HINSTANCE) GetWindowLongPtr(hwnd, GWLP_HINSTANCE);
+            auto hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ICON));
+            SendMessage(hwnd, WM_SETICON, ICON_BIG, (LPARAM) hIcon);
+            SendMessage(hwnd, WM_SETICON, ICON_SMALL, (LPARAM) hIcon);
+            return TRUE;
+        }
+
+        case WM_CLOSE:
+            DestroyWindow(hwnd);
+            g_aboutDlg = nullptr;
+            return TRUE;
+
+        case WM_COMMAND: {
+            WORD id = LOWORD(wParam);
+            if (id == ID_ABOUTDLG_OK) {
+                DestroyWindow(hwnd);
+                g_aboutDlg = nullptr;
+                return TRUE;
+            }
+
+            if (id == ID_ABOUTDLG_GOTOREPO) {
+                ShellExecuteW(hwnd, L"open", L"https://github.com/phu54321/batteryLoggerCpp", nullptr, nullptr,
+                              SW_SHOWNORMAL);
+                return TRUE;
+            }
+            return TRUE;
+        }
+
+        default:
+            return FALSE;
+    }
+}
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     if (uMsg == g_wmTaskbarCreated) {
-        AddTrayIcon(hwnd, (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE));
+        AddTrayIcon(hwnd, (HINSTANCE) GetWindowLongPtr(hwnd, GWLP_HINSTANCE));
         return 0;
     }
 
     switch (uMsg) {
         case WM_CREATE:
-            AddTrayIcon(hwnd, ((LPCREATESTRUCT)lParam)->hInstance);
+            AddTrayIcon(hwnd, ((LPCREATESTRUCT) lParam)->hInstance);
             logTask(machineId);
             SetTimer(hwnd, TIMER_LOG, 60000, nullptr);
             return 0;
@@ -280,8 +326,25 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             return 0;
 
         case WM_COMMAND:
-            if (LOWORD(wParam) == IDM_QUIT) {
-                DestroyWindow(hwnd);
+            switch (LOWORD(wParam)) {
+                case IDM_QUIT:
+                    DestroyWindow(hwnd);
+                    break;
+
+                case IDM_OPENLOG:
+                    ShellExecuteW(hwnd, L"open", getLogPath().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+                    break;
+
+                case IDM_ABOUT:
+                    if (g_aboutDlg == nullptr) {
+                        auto hInstance = (HINSTANCE) GetWindowLongPtr(hwnd, GWLP_HINSTANCE);
+                        g_aboutDlg = CreateDialog(
+                            hInstance,
+                            MAKEINTRESOURCE(IDD_ABOUT),
+                            hwnd,
+                            AboutDlgProc);
+                    }
+                    break;
             }
             return 0;
 
@@ -294,6 +357,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     if (!ensureSingleInstance()) {
         return 0; // silently exit if another instance exists
     }
+
+    SetProcessDPIAware();
 
     machineId = getMachineId();
     g_wmTaskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
@@ -331,6 +396,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     MSG msg = {};
     while (GetMessage(&msg, nullptr, 0, 0)) {
+        if (g_aboutDlg && IsDialogMessage(g_aboutDlg, &msg)) {
+            continue;
+        }
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }

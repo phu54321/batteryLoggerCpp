@@ -11,6 +11,25 @@
 
 
 //
+// Dialog resources
+//
+LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
+IDD_ABOUT DIALOG 0, 0, 186, 95
+STYLE DS_3DLOOK | DS_CENTER | DS_MODALFRAME | DS_SHELLFONT | WS_CAPTION | WS_VISIBLE | WS_POPUP | WS_SYSMENU
+CAPTION "About batteryLoggerCpp"
+FONT 8, "Ms Shell Dlg"
+{
+    LTEXT           "batteryLoggerCpp", 0, 65, 10, 57, 9, SS_LEFT, WS_EX_LEFT
+    LTEXT           "https://github.com/phu54321/batteryLogCpp", 0, 21, 25, 144, 9, SS_LEFT, WS_EX_LEFT
+    LTEXT           "Copyright 2025 Park Hyunwoo", 0, 45, 43, 97, 9, SS_LEFT, WS_EX_LEFT
+    LTEXT           "This program is distributed by GPL 3.0", 0, 33, 54, 120, 9, SS_LEFT, WS_EX_LEFT
+    DEFPUSHBUTTON   "Go to Github repo", ID_ABOUTDLG_GOTOREPO, 23, 71, 70, 14, 0, WS_EX_LEFT
+    DEFPUSHBUTTON   "OK", ID_ABOUTDLG_OK, 103, 71, 50, 14, 0, WS_EX_LEFT
+}
+
+
+
+//
 // Icon resources
 //
 LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
