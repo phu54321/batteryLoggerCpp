@@ -2,9 +2,8 @@
 #define _CRT_SECURE_NO_WARNINGS
 
 #include <windows.h>
+#include <shellapi.h>
 #include <iphlpapi.h>
-#pragma comment(lib, "iphlpapi.lib")
-
 #include <chrono>
 #include <thread>
 #include <filesystem>
@@ -16,6 +15,7 @@
 #include <cstdlib>
 #include <atomic>
 #include <memory>
+#include "resource.h"
 
 // Simple 32-bit FNV-1a hash for MAC bytes (non-cryptographic but enough
 // to avoid leaking the raw address directly).
@@ -189,17 +189,62 @@ bool ensureSingleInstance() {
 }
 
 std::string machineId;
+UINT g_wmTaskbarCreated = 0;
 
 #define TIMER_LOG 0x1525
+#define WM_TRAYICON (WM_USER + 1)
+#define IDM_QUIT 1001
+
+void AddTrayIcon(HWND hwnd, HINSTANCE hInstance) {
+    NOTIFYICONDATAW nid = {};
+    nid.cbSize = sizeof(NOTIFYICONDATAW);
+    nid.hWnd = hwnd;
+    nid.uID = 1;
+    nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+    nid.uCallbackMessage = WM_TRAYICON;
+    nid.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ICON));
+    wcscpy_s(nid.szTip, L"batteryLogger");
+    Shell_NotifyIconW(NIM_ADD, &nid);
+}
+
+void RemoveTrayIcon(HWND hwnd) {
+    NOTIFYICONDATAW nid = {};
+    nid.cbSize = sizeof(NOTIFYICONDATAW);
+    nid.hWnd = hwnd;
+    nid.uID = 1;
+    Shell_NotifyIconW(NIM_DELETE, &nid);
+}
+
+void ShowContextMenu(HWND hwnd) {
+    POINT pt;
+    GetCursorPos(&pt);
+    HMENU hMenu = CreatePopupMenu();
+    AppendMenuW(hMenu, MF_STRING | MF_GRAYED, 0, L"batteryLogger");
+    AppendMenuW(hMenu, MF_STRING, IDM_QUIT, L"Quit");
+
+    SetForegroundWindow(hwnd);
+
+    TrackPopupMenu(hMenu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, nullptr);
+    PostMessage(hwnd, WM_NULL, 0, 0);
+    DestroyMenu(hMenu);
+}
+
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    if (uMsg == g_wmTaskbarCreated) {
+        AddTrayIcon(hwnd, (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE));
+        return 0;
+    }
+
     switch (uMsg) {
         case WM_CREATE:
+            AddTrayIcon(hwnd, ((LPCREATESTRUCT)lParam)->hInstance);
             logTask(machineId);
             SetTimer(hwnd, TIMER_LOG, 60000, nullptr);
             return 0;
 
         case WM_DESTROY:
+            RemoveTrayIcon(hwnd);
             KillTimer(hwnd, TIMER_LOG);
             PostQuitMessage(0);
             return 0;
@@ -207,6 +252,18 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         case WM_TIMER:
             if (wParam == TIMER_LOG) {
                 logTask(machineId);
+            }
+            return 0;
+
+        case WM_TRAYICON:
+            if (lParam == WM_RBUTTONUP) {
+                ShowContextMenu(hwnd);
+            }
+            return 0;
+
+        case WM_COMMAND:
+            if (LOWORD(wParam) == IDM_QUIT) {
+                DestroyWindow(hwnd);
             }
             return 0;
 
@@ -221,6 +278,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     }
 
     machineId = getMachineId();
+    g_wmTaskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
 
     const wchar_t CLASS_NAME[] = L"BatteryLoggerHiddenWindowClass";
 
