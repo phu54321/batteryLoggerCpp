@@ -1,4 +1,6 @@
-cmake_minimum_required(VERSION 4.0)
+# github runner runs on cmake 3.31+, so keep this low.
+cmake_minimum_required(VERSION 3.0)
+
 project(batteryLoggerCpp)
 
 set(CMAKE_CXX_STANDARD 20)
