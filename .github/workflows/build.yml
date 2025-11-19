@@ -28,8 +28,16 @@ jobs:
         # Build your program with the given configuration
         run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}}
 
+      - name: Prepare artifact directory
+        run: |
+          mkdir ${{github.workspace}}\artifact
+          copy ${{github.workspace}}\build\${{env.BUILD_TYPE}}\batteryLoggerCpp.exe `
+               ${{github.workspace}}\artifact\
+          copy ${{github.workspace}}\LICENSE `
+               ${{github.workspace}}\artifact\
+
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          path: ${{github.workspace}}/build/${{env.BUILD_TYPE}}/batteryLoggerCpp.exe
           name: batteryLoggerCpp.exe
+          path: ${{github.workspace}}/artifact
