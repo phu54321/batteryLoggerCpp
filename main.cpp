@@ -170,10 +170,12 @@ void logTask(const std::string &machineId) {
     namespace fs = std::filesystem;
     bool fileExists = fs::exists(logPath);
 
-    auto fp = _wfopen(logPath.c_str(), L"a");
+    auto fp = _wfopen(logPath.c_str(), L"a+");
     if (!fp) {
         return;
     }
+
+    fseek(fp, 0, SEEK_END);
 
     if (!fileExists || ftell(fp) == 0) {
         fprintf(fp, "time,plugged,percent,machine_id\n");
