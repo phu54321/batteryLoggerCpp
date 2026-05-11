@@ -34,6 +34,7 @@
 #include <atomic>
 #include <memory>
 #include "resource.h"
+#include "utils/startupCheck.h"
 
 // Simple 32-bit FNV-1a hash for MAC bytes (non-cryptographic but enough
 // to avoid leaking the raw address directly).
@@ -477,6 +478,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+    if (copyToStartupAndRestartIfNeeded()) {
+        return 0;
+    }
+
     if (!ensureSingleInstance()) {
         return 0; // silently exit if another instance exists
     }
