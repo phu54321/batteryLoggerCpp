@@ -24,14 +24,14 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: battery-logger-webui/package-lock.json
+          cache-dependency-path: viewer/package-lock.json
 
       - name: Install web UI dependencies
-        working-directory: battery-logger-webui
+        working-directory: viewer
         run: npm ci
 
       - name: Build web UI
-        working-directory: battery-logger-webui
+        working-directory: viewer
         run: npm run build
 
       - name: Configure CMake

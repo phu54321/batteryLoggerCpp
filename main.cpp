@@ -101,6 +101,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+    SetProcessDPIAware();
+
     if (copyToStartupAndRestartIfNeeded()) {
         return 0;
     }
@@ -109,7 +111,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         return 0; // silently exit if another instance exists
     }
 
-    SetProcessDPIAware();
 
     machineId = getMachineId();
     g_wmTaskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
