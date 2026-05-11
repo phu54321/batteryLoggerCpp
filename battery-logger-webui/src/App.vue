@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 type BatteryLogRow = {
   time: string
@@ -28,10 +28,18 @@ const csvText = ref(embeddedCsv)
 const loadError = ref('')
 
 const rows = computed(() => parseBatteryLog(csvText.value))
-const segments = computed(() =>
-  createBatterySegments(rows.value).filter((segment) => segment.startTimestamp !== segment.endTimestamp),
-)
 const machineIds = computed(() => Array.from(new Set(rows.value.map((row) => row.machineId))))
+const selectedMachineId = ref('')
+const machineRows = computed(() =>
+  selectedMachineId.value === ''
+    ? rows.value
+    : rows.value.filter((row) => row.machineId === selectedMachineId.value),
+)
+const segments = computed(() =>
+  createBatterySegments(machineRows.value).filter(
+    (segment) => segment.startTimestamp !== segment.endTimestamp,
+  ),
+)
 const chargingSegments = computed(() => segments.value.filter((segment) => segment.plugged))
 const dischargingSegments = computed(() => segments.value.filter((segment) => !segment.plugged))
 
@@ -130,16 +138,35 @@ function formatPercentChange(segment: BatterySegment): string {
 }
 
 function formatRate(segment: BatterySegment): string {
-  const elapsedHours = (segment.endTimestamp - segment.startTimestamp) / 3600000
+  const elapsedMs = segment.endTimestamp - segment.startTimestamp
 
-  if (elapsedHours <= 0) {
+  if (elapsedMs < 10 * 60 * 1000) {
     return '-'
   }
 
+  const elapsedHours = elapsedMs / 3600000
   const percentChange = segment.endPercent - segment.startPercent
   const signedRate = percentChange / elapsedHours
 
   return `${signedRate > 0 ? '+' : ''}${signedRate.toFixed(2)}%/hr`
+}
+
+function rateTone(segment: BatterySegment): string {
+  if (segment.endTimestamp - segment.startTimestamp < 10 * 60 * 1000) {
+    return ''
+  }
+
+  const percentChange = segment.endPercent - segment.startPercent
+
+  if (percentChange > 0) {
+    return 'rate-positive'
+  }
+
+  if (percentChange < 0) {
+    return 'rate-negative'
+  }
+
+  return ''
 }
 
 async function loadDevelopmentCsv() {
@@ -165,6 +192,21 @@ async function loadDevelopmentCsv() {
 if (import.meta.env.DEV) {
   loadDevelopmentCsv()
 }
+
+watch(
+  machineIds,
+  (ids) => {
+    if (ids.length === 0) {
+      selectedMachineId.value = ''
+      return
+    }
+
+    if (!selectedMachineId.value || !ids.includes(selectedMachineId.value)) {
+      selectedMachineId.value = ids[0] ?? ''
+    }
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
@@ -202,13 +244,25 @@ if (import.meta.env.DEV) {
 
     <section v-else class="table-wrap" aria-label="Battery segment table">
       <div class="table-header">
-        <h2>Segments</h2>
-        <p>{{ rows.length }} samples across {{ machineIds.length }} machine{{ machineIds.length === 1 ? '' : 's' }}</p>
+        <div>
+          <h2>Segments</h2>
+          <p>
+            {{ machineRows.length }} samples for machine
+            <strong>{{ selectedMachineId }}</strong>
+          </p>
+        </div>
+        <label class="machine-picker">
+          <span>Machine</span>
+          <select v-model="selectedMachineId">
+            <option v-for="machineId in machineIds" :key="machineId" :value="machineId">
+              {{ machineId }}
+            </option>
+          </select>
+        </label>
       </div>
       <table>
         <thead>
           <tr>
-            <th>Machine</th>
             <th>Mode</th>
             <th>Start</th>
             <th>End</th>
@@ -220,10 +274,13 @@ if (import.meta.env.DEV) {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="segment in segments" :key="segment.id">
-            <td>{{ segment.machineId }}</td>
+          <tr
+            v-for="segment in segments"
+            :key="segment.id"
+            :class="segment.plugged ? 'segment-charging' : 'segment-discharging'"
+          >
             <td>
-              <span class="mode-pill" :class="segment.plugged ? 'mode-charging' : 'mode-discharging'">
+              <span class="mode-pill">
                 {{ segment.plugged ? 'Charging' : 'Discharging' }}
               </span>
             </td>
@@ -233,7 +290,11 @@ if (import.meta.env.DEV) {
             <td>{{ segment.startPercent }}%</td>
             <td>{{ segment.endPercent }}%</td>
             <td>{{ formatPercentChange(segment) }}</td>
-            <td>{{ formatRate(segment) }}</td>
+            <td>
+              <span class="rate-value" :class="rateTone(segment)">
+                {{ formatRate(segment) }}
+              </span>
+            </td>
           </tr>
         </tbody>
       </table>
@@ -349,6 +410,29 @@ h1 {
   font-size: 13px;
 }
 
+.machine-picker {
+  display: grid;
+  gap: 6px;
+  min-width: 180px;
+}
+
+.machine-picker span {
+  color: #687383;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.machine-picker select {
+  width: 100%;
+  padding: 8px 32px 8px 10px;
+  border: 1px solid #cbd3df;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #1c2530;
+  font: inherit;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -374,6 +458,14 @@ tr:last-child td {
   border-bottom: 0;
 }
 
+.segment-charging {
+  background: #f3fbf5;
+}
+
+.segment-discharging {
+  background: #fff8ed;
+}
+
 .mode-pill {
   display: inline-flex;
   align-items: center;
@@ -381,18 +473,23 @@ tr:last-child td {
   justify-content: center;
   padding: 4px 8px;
   border-radius: 999px;
+  border: 1px solid #cbd3df;
+  background: rgba(255, 255, 255, 0.72);
+  color: #3f4a58;
   font-size: 12px;
   font-weight: 700;
 }
 
-.mode-charging {
-  background: #e7f6ec;
-  color: #1c6b3a;
+.rate-value {
+  font-weight: 750;
 }
 
-.mode-discharging {
-  background: #fff1dc;
-  color: #875015;
+.rate-positive {
+  color: #15773b;
+}
+
+.rate-negative {
+  color: #b42318;
 }
 
 @media (max-width: 760px) {
