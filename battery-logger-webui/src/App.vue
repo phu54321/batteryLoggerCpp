@@ -14,6 +14,13 @@ let dragDepth = 0
 
 const rows = computed(() => parseBatteryLog(csvText.value))
 const machineIds = computed(() => Array.from(new Set(rows.value.map((row) => row.machineId))))
+const latestMachineId = computed(() => rows.value.at(-1)?.machineId ?? '')
+const machineOptions = computed(() =>
+  machineIds.value.map((machineId) => ({
+    id: machineId,
+    sampleCount: rows.value.filter((row) => row.machineId === machineId).length,
+  })),
+)
 const selectedMachineId = ref('')
 const machineRows = computed(() =>
   selectedMachineId.value === ''
@@ -246,7 +253,7 @@ watch(
     }
 
     if (!selectedMachineId.value || !ids.includes(selectedMachineId.value)) {
-      selectedMachineId.value = ids[0] ?? ''
+      selectedMachineId.value = latestMachineId.value || ids[0] || ''
     }
   },
   { immediate: true },
@@ -326,8 +333,8 @@ watch(segments, () => {
         <label class="machine-picker">
           <span>Machine</span>
           <select v-model="selectedMachineId">
-            <option v-for="machineId in machineIds" :key="machineId" :value="machineId">
-              {{ machineId }}
+            <option v-for="machine in machineOptions" :key="machine.id" :value="machine.id">
+              {{ machine.id }} ({{ machine.sampleCount }} samples)
             </option>
           </select>
         </label>
