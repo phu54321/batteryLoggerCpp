@@ -20,7 +20,10 @@ const margin = {
   bottom: 32,
 }
 const plotHeight = height - margin.top - margin.bottom
-const visibleRangeMs = 2 * 24 * 60 * 60 * 1000
+const dayMs = 24 * 60 * 60 * 1000
+const minVisibleDays = 1
+const maxVisibleDays = 7
+const visibleDays = ref(2)
 const graphScroller = ref<HTMLElement | null>(null)
 const viewportWidth = ref(928)
 let resizeObserver: ResizeObserver | null = null
@@ -33,7 +36,7 @@ const maxTimestamp = computed(() =>
 )
 const timestampRange = computed(() => Math.max(1, maxTimestamp.value - minTimestamp.value))
 const plotWidth = computed(() =>
-  Math.max(viewportWidth.value, (timestampRange.value / visibleRangeMs) * viewportWidth.value),
+  Math.max(viewportWidth.value, (timestampRange.value / (visibleDays.value * dayMs)) * viewportWidth.value),
 )
 const svgWidth = computed(() => plotWidth.value + rightPadding)
 
@@ -45,7 +48,7 @@ const linePoints = computed(() =>
 
 const yGridLines = [100, 75, 50, 25, 0]
 const xTicks = computed(() => {
-  const tickStepMs = 24 * 60 * 60 * 1000
+  const tickStepMs = visibleDays.value <= 1.5 ? 6 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000
   const firstTick = Math.ceil(minTimestamp.value / tickStepMs) * tickStepMs
   const ticks: number[] = [minTimestamp.value]
 
@@ -88,7 +91,7 @@ function formatTickTime(timestamp: number): string {
   return new Date(timestamp).toLocaleString(undefined, {
     month: 'short',
     day: 'numeric',
-    hour: '2-digit',
+    ...(visibleDays.value <= 1.5 ? { hour: '2-digit' as const } : {}),
   })
 }
 
@@ -114,6 +117,37 @@ function scrollActiveSegmentIntoView() {
   scroller.scrollTo({
     left: scrollLeft,
     behavior: 'smooth',
+  })
+}
+
+function clampVisibleDays(days: number): number {
+  return Math.min(maxVisibleDays, Math.max(minVisibleDays, days))
+}
+
+function handleGraphWheel(event: WheelEvent) {
+  const scroller = graphScroller.value
+
+  if (scroller === null || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) {
+    return
+  }
+
+  event.preventDefault()
+
+  const oldPlotWidth = plotWidth.value
+  const scrollerRect = scroller.getBoundingClientRect()
+  const pointerX = Math.min(scroller.clientWidth, Math.max(0, event.clientX - scrollerRect.left))
+  const pointerTimelineRatio = (scroller.scrollLeft + pointerX) / oldPlotWidth
+  const zoomDirection = event.deltaY > 0 ? 1 : -1
+  const nextVisibleDays = clampVisibleDays(visibleDays.value + zoomDirection * 0.5)
+
+  if (nextVisibleDays === visibleDays.value) {
+    return
+  }
+
+  visibleDays.value = nextVisibleDays
+
+  nextTick(() => {
+    scroller.scrollLeft = Math.max(0, pointerTimelineRatio * plotWidth.value - pointerX)
   })
 }
 
@@ -149,6 +183,17 @@ watch(
         <span class="legend-item legend-charging">Charging</span>
         <span class="legend-item legend-discharging">Discharging</span>
       </div>
+      <label class="zoom-control">
+        <span>Zoom</span>
+        <input
+          v-model.number="visibleDays"
+          type="range"
+          :min="minVisibleDays"
+          :max="maxVisibleDays"
+          step="0.5"
+        />
+        <strong>{{ visibleDays }}d</strong>
+      </label>
     </div>
 
     <div class="graph-body">
@@ -164,7 +209,7 @@ watch(
         </g>
       </svg>
 
-      <div ref="graphScroller" class="graph-scroller">
+      <div ref="graphScroller" class="graph-scroller" @wheel="handleGraphWheel">
         <svg
           class="battery-graph"
           :style="{ width: `${svgWidth}px` }"
@@ -305,6 +350,26 @@ watch(
   background: #fff0d8;
 }
 
+.zoom-control {
+  display: grid;
+  grid-template-columns: auto minmax(120px, 180px) 32px;
+  align-items: center;
+  gap: 8px;
+  color: #4d5968;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.zoom-control input {
+  accent-color: #24364b;
+}
+
+.zoom-control strong {
+  color: #1c2530;
+  font-size: 12px;
+  text-align: right;
+}
+
 .graph-body {
   position: relative;
   padding-left: 48px;
@@ -396,6 +461,11 @@ watch(
   .graph-header {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .zoom-control {
+    width: 100%;
+    grid-template-columns: auto minmax(120px, 1fr) 32px;
   }
 
   .battery-graph {
