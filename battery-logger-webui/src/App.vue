@@ -3,9 +3,22 @@ import { computed, ref } from 'vue'
 
 type BatteryLogRow = {
   time: string
+  timestamp: number
   plugged: boolean
   percent: number
   machineId: string
+}
+
+type BatterySegment = {
+  id: string
+  machineId: string
+  plugged: boolean
+  startTime: string
+  endTime: string
+  startTimestamp: number
+  endTimestamp: number
+  startPercent: number
+  endPercent: number
 }
 
 const embeddedCsvSlot = String.raw`<<<<<>>>>>`
@@ -15,9 +28,14 @@ const csvText = ref(embeddedCsv)
 const loadError = ref('')
 
 const rows = computed(() => parseBatteryLog(csvText.value))
+const segments = computed(() =>
+  createBatterySegments(rows.value).filter((segment) => segment.startTimestamp !== segment.endTimestamp),
+)
 const machineIds = computed(() => Array.from(new Set(rows.value.map((row) => row.machineId))))
-const unpluggedRows = computed(() => rows.value.filter((row) => !row.plugged))
-const visibleRows = computed(() => rows.value.slice(0, 200))
+const chargingSegments = computed(() => segments.value.filter((segment) => segment.plugged))
+const dischargingSegments = computed(() => segments.value.filter((segment) => !segment.plugged))
+
+const dischargeSleepThresholdMs = 5 * 60 * 1000
 
 function parseBatteryLog(csv: string): BatteryLogRow[] {
   return csv
@@ -28,15 +46,100 @@ function parseBatteryLog(csv: string): BatteryLogRow[] {
     .filter((line) => !line.startsWith('time,'))
     .map((line) => {
       const [time = '', plugged = '', percent = '', machineId = ''] = line.split(',')
+      const timestamp = Date.parse(time)
 
       return {
         time,
+        timestamp,
         plugged: plugged === 'True',
         percent: Number.parseInt(percent, 10),
         machineId,
       }
     })
-    .filter((row) => row.time && Number.isFinite(row.percent))
+    .filter((row) => row.time && Number.isFinite(row.timestamp) && Number.isFinite(row.percent))
+}
+
+function createBatterySegments(logRows: BatteryLogRow[]): BatterySegment[] {
+  const batterySegments: BatterySegment[] = []
+  let currentSegment: BatterySegment | null = null
+
+  for (const row of logRows) {
+    if (currentSegment === null) {
+      currentSegment = createSegment(row, batterySegments.length)
+      continue
+    }
+
+    const isSameMachine = currentSegment.machineId === row.machineId
+    const isSamePowerState = currentSegment.plugged === row.plugged
+    const timeSinceLastSample = row.timestamp - currentSegment.endTimestamp
+    const shouldSplitForSleep =
+      !currentSegment.plugged && timeSinceLastSample > dischargeSleepThresholdMs
+
+    if (!isSameMachine || !isSamePowerState || shouldSplitForSleep) {
+      batterySegments.push(currentSegment)
+      currentSegment = createSegment(row, batterySegments.length)
+      continue
+    }
+
+    currentSegment = {
+      ...currentSegment,
+      endTime: row.time,
+      endTimestamp: row.timestamp,
+      endPercent: row.percent,
+    }
+  }
+
+  if (currentSegment !== null) {
+    batterySegments.push(currentSegment)
+  }
+
+  return batterySegments
+}
+
+function createSegment(row: BatteryLogRow, index: number): BatterySegment {
+  return {
+    id: `${row.machineId}-${row.time}-${index}`,
+    machineId: row.machineId,
+    plugged: row.plugged,
+    startTime: row.time,
+    endTime: row.time,
+    startTimestamp: row.timestamp,
+    endTimestamp: row.timestamp,
+    startPercent: row.percent,
+    endPercent: row.percent,
+  }
+}
+
+function formatDuration(segment: BatterySegment): string {
+  const totalMinutes = Math.max(0, Math.round((segment.endTimestamp - segment.startTimestamp) / 60000))
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+
+  if (hours === 0) {
+    return `${minutes}m`
+  }
+
+  return `${hours}h ${minutes}m`
+}
+
+function formatPercentChange(segment: BatterySegment): string {
+  const percentChange = segment.endPercent - segment.startPercent
+  const sign = percentChange > 0 ? '+' : ''
+
+  return `${sign}${percentChange}%`
+}
+
+function formatRate(segment: BatterySegment): string {
+  const elapsedHours = (segment.endTimestamp - segment.startTimestamp) / 3600000
+
+  if (elapsedHours <= 0) {
+    return '-'
+  }
+
+  const percentChange = segment.endPercent - segment.startPercent
+  const signedRate = percentChange / elapsedHours
+
+  return `${signedRate > 0 ? '+' : ''}${signedRate.toFixed(2)}%/hr`
 }
 
 async function loadDevelopmentCsv() {
@@ -73,16 +176,16 @@ if (import.meta.env.DEV) {
       </div>
       <div class="summary-strip">
         <div>
-          <span>{{ rows.length }}</span>
-          <small>Rows</small>
+          <span>{{ segments.length }}</span>
+          <small>Segments</small>
         </div>
         <div>
-          <span>{{ machineIds.length }}</span>
-          <small>Machines</small>
+          <span>{{ chargingSegments.length }}</span>
+          <small>Charging</small>
         </div>
         <div>
-          <span>{{ unpluggedRows.length }}</span>
-          <small>Unplugged</small>
+          <span>{{ dischargingSegments.length }}</span>
+          <small>Discharging</small>
         </div>
       </div>
     </header>
@@ -97,28 +200,43 @@ if (import.meta.env.DEV) {
       <code>&lt;&lt;&lt;&lt;&lt;&gt;&gt;&gt;&gt;&gt;</code>.
     </section>
 
-    <section v-else class="table-wrap" aria-label="Battery log table">
+    <section v-else class="table-wrap" aria-label="Battery segment table">
+      <div class="table-header">
+        <h2>Segments</h2>
+        <p>{{ rows.length }} samples across {{ machineIds.length }} machine{{ machineIds.length === 1 ? '' : 's' }}</p>
+      </div>
       <table>
         <thead>
           <tr>
-            <th>Time</th>
             <th>Machine</th>
-            <th>Power</th>
-            <th>Percent</th>
+            <th>Mode</th>
+            <th>Start</th>
+            <th>End</th>
+            <th>Duration</th>
+            <th>Start %</th>
+            <th>End %</th>
+            <th>Change</th>
+            <th>Rate</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="row in visibleRows" :key="`${row.machineId}-${row.time}`">
-            <td>{{ row.time }}</td>
-            <td>{{ row.machineId }}</td>
-            <td>{{ row.plugged ? 'Plugged' : 'Battery' }}</td>
-            <td>{{ row.percent }}%</td>
+          <tr v-for="segment in segments" :key="segment.id">
+            <td>{{ segment.machineId }}</td>
+            <td>
+              <span class="mode-pill" :class="segment.plugged ? 'mode-charging' : 'mode-discharging'">
+                {{ segment.plugged ? 'Charging' : 'Discharging' }}
+              </span>
+            </td>
+            <td>{{ segment.startTime }}</td>
+            <td>{{ segment.endTime }}</td>
+            <td>{{ formatDuration(segment) }}</td>
+            <td>{{ segment.startPercent }}%</td>
+            <td>{{ segment.endPercent }}%</td>
+            <td>{{ formatPercentChange(segment) }}</td>
+            <td>{{ formatRate(segment) }}</td>
           </tr>
         </tbody>
       </table>
-      <p v-if="rows.length > visibleRows.length" class="table-note">
-        Showing first {{ visibleRows.length }} of {{ rows.length }} rows.
-      </p>
     </section>
   </main>
 </template>
@@ -208,6 +326,29 @@ h1 {
   overflow: hidden;
 }
 
+.table-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px;
+  border-bottom: 1px solid #e7eaf0;
+}
+
+.table-header h2,
+.table-header p {
+  margin: 0;
+}
+
+.table-header h2 {
+  font-size: 18px;
+}
+
+.table-header p {
+  color: #687383;
+  font-size: 13px;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -233,12 +374,25 @@ tr:last-child td {
   border-bottom: 0;
 }
 
-.table-note {
-  margin: 0;
-  padding: 12px 14px;
-  border-top: 1px solid #e7eaf0;
-  color: #687383;
-  font-size: 13px;
+.mode-pill {
+  display: inline-flex;
+  align-items: center;
+  min-width: 92px;
+  justify-content: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.mode-charging {
+  background: #e7f6ec;
+  color: #1c6b3a;
+}
+
+.mode-discharging {
+  background: #fff1dc;
+  color: #875015;
 }
 
 @media (max-width: 760px) {
@@ -258,6 +412,11 @@ tr:last-child td {
 
   .summary-strip div {
     min-width: 0;
+  }
+
+  .table-header {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .table-wrap {
