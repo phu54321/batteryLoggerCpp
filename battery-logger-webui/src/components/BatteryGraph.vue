@@ -12,7 +12,7 @@ const emit = defineEmits<{
   activateSegment: [segmentId: string]
 }>()
 
-const height = 260
+const height = 240
 const axisWidth = 48
 const rightPadding = 24
 const margin = {
