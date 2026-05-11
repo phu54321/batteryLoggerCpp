@@ -34,3 +34,11 @@ FONT 8, "Ms Shell Dlg"
 //
 LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
 IDI_ICON           ICON           ".\\icon.ico"
+
+
+
+//
+// Raw data resources
+//
+LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
+IDR_WEBUI_HTML     RCDATA         ".\\battery-logger-webui\\dist\\index.html"
