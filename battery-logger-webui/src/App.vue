@@ -1,25 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-
-type BatteryLogRow = {
-  time: string
-  timestamp: number
-  plugged: boolean
-  percent: number
-  machineId: string
-}
-
-type BatterySegment = {
-  id: string
-  machineId: string
-  plugged: boolean
-  startTime: string
-  endTime: string
-  startTimestamp: number
-  endTimestamp: number
-  startPercent: number
-  endPercent: number
-}
+import BatteryGraph from '@/components/BatteryGraph.vue'
+import type { BatteryLogRow, BatterySegment } from '@/types/battery'
 
 const embeddedCsvSlot = String.raw`<<<<<>>>>>`
 const embeddedCsv = embeddedCsvSlot.slice(5, embeddedCsvSlot.length - 5).trim()
@@ -44,6 +26,7 @@ const chargingSegments = computed(() => segments.value.filter((segment) => segme
 const dischargingSegments = computed(() => segments.value.filter((segment) => !segment.plugged))
 
 const dischargeSleepThresholdMs = 5 * 60 * 1000
+const activeSegmentId = ref('')
 
 function parseBatteryLog(csv: string): BatteryLogRow[] {
   return csv
@@ -169,6 +152,10 @@ function rateTone(segment: BatterySegment): string {
   return ''
 }
 
+function activateSegment(segmentId: string) {
+  activeSegmentId.value = segmentId
+}
+
 async function loadDevelopmentCsv() {
   const privateCsvPath = './assets/testdata/batteryLog.local.csv?raw'
   const sampleCsvPath = './assets/testdata/batteryLog.csv?raw'
@@ -207,6 +194,10 @@ watch(
   },
   { immediate: true },
 )
+
+watch(segments, () => {
+  activeSegmentId.value = segments.value[0]?.id ?? ''
+})
 </script>
 
 <template>
@@ -242,7 +233,15 @@ watch(
       <code>&lt;&lt;&lt;&lt;&lt;&gt;&gt;&gt;&gt;&gt;</code>.
     </section>
 
-    <section v-else class="table-wrap" aria-label="Battery segment table">
+    <template v-else>
+      <BatteryGraph
+        :rows="machineRows"
+        :segments="segments"
+        :active-segment-id="activeSegmentId"
+        @activate-segment="activateSegment"
+      />
+
+      <section class="table-wrap" aria-label="Battery segment table">
       <div class="table-header">
         <div>
           <h2>Segments</h2>
@@ -277,7 +276,11 @@ watch(
           <tr
             v-for="segment in segments"
             :key="segment.id"
-            :class="segment.plugged ? 'segment-charging' : 'segment-discharging'"
+            :class="[
+              segment.plugged ? 'segment-charging' : 'segment-discharging',
+              { 'segment-active': segment.id === activeSegmentId },
+            ]"
+            @click="activateSegment(segment.id)"
           >
             <td>
               <span class="mode-pill">
@@ -298,7 +301,8 @@ watch(
           </tr>
         </tbody>
       </table>
-    </section>
+      </section>
+    </template>
   </main>
 </template>
 
@@ -464,6 +468,11 @@ tr:last-child td {
 
 .segment-discharging {
   background: #fff8ed;
+}
+
+.segment-active {
+  outline: 2px solid #24364b;
+  outline-offset: -2px;
 }
 
 .mode-pill {
