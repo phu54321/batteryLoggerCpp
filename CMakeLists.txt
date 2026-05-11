@@ -5,7 +5,18 @@ project(batteryLoggerCpp)
 
 set(CMAKE_CXX_STANDARD 20)
 
-add_executable(batteryLoggerCpp WIN32 main.cpp resource.rc utils/startupCheck.cpp utils/webLogReport.cpp utils/machineId.cpp utils/batteryStatus.cpp utils/singleInstance.cpp)
+add_executable(batteryLoggerCpp WIN32
+        main.cpp
+        resource.rc
+        utils/aboutDialog.cpp
+        utils/batteryLog.cpp
+        utils/batteryStatus.cpp
+        utils/machineId.cpp
+        utils/singleInstance.cpp
+        utils/startupCheck.cpp
+        utils/trayIcon.cpp
+        utils/webLogReport.cpp
+)
 target_compile_definitions(batteryLoggerCpp PRIVATE UNICODE _UNICODE)
 target_link_libraries(batteryLoggerCpp PRIVATE iphlpapi)
 set_property(TARGET batteryLoggerCpp PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")

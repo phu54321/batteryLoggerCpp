@@ -21,173 +21,18 @@
 
 #include <windows.h>
 #include <shellapi.h>
-#include <chrono>
-#include <thread>
-#include <filesystem>
-#include <iomanip>
-#include <sstream>
 #include <string>
-#include <cstdlib>
-#include <atomic>
-#include "resource.h"
-#include "utils/batteryStatus.h"
+#include "utils/aboutDialog.h"
+#include "utils/appConstants.h"
+#include "utils/batteryLog.h"
 #include "utils/machineId.h"
 #include "utils/singleInstance.h"
 #include "utils/startupCheck.h"
+#include "utils/trayIcon.h"
 #include "utils/webLogReport.h"
-
-// Get ISO-8601-like local time string (YYYY-MM-DDTHH:MM:SS)
-std::string getCurrentIsoTime() {
-    auto now = std::chrono::system_clock::now();
-    std::time_t tt = std::chrono::system_clock::to_time_t(now);
-    std::tm tmLocal{};
-    localtime_s(&tmLocal, &tt);
-
-    std::stringstream ss;
-    ss << std::put_time(&tmLocal, "%Y-%m-%dT%H:%M:%S");
-    return ss.str();
-}
-
-// Simplified stub; your Python version currently doesn't use this because the
-// CPU scan is commented out.
-void getAppWithMaxCpuUsage(std::string &exeName, double &cpuUsage) {
-    exeName.clear();
-    cpuUsage = 0.0;
-    // If you ever want this enabled, you'll need to sample process CPU times
-    // via GetProcessTimes / PDH, similar to psutil's behavior.
-}
-
-// Expand "~" to user home directory (rough equivalent of os.path.expanduser("~"))
-std::wstring getHomeDir() {
-    const wchar_t *userProfile = _wgetenv(L"USERPROFILE");
-    if (userProfile && *userProfile) {
-        return userProfile;
-    }
-    // Fallback to current directory
-    return L".";
-}
-
-std::wstring getLogPath() {
-    std::wstring home = getHomeDir();
-    std::wstring path = home + L"\\batteryLog.csv";
-    return path;
-}
-
-void logTask(const std::string &machineId) {
-    bool plugged = false;
-    int percent = -1;
-    if (!getBatteryStatus(plugged, percent)) {
-        // If we can't get battery status, just return; you can also log an error if you want.
-        return;
-    }
-
-    // CPU process info currently disabled, same as the Python code.
-    auto logPath = getLogPath();
-    namespace fs = std::filesystem;
-    bool fileExists = fs::exists(logPath);
-
-    auto fp = _wfopen(logPath.c_str(), L"a+");
-    if (!fp) {
-        return;
-    }
-
-    fseek(fp, 0, SEEK_END);
-
-    if (!fileExists || ftell(fp) == 0) {
-        fprintf(fp, "time,plugged,percent,machine_id\n");
-    }
-
-    fprintf(fp, "%s,%s,%s,%s\n",
-            getCurrentIsoTime().c_str(),
-            plugged ? "True" : "False",
-            std::to_string(percent).c_str(),
-            machineId.c_str()
-    );
-
-    fclose(fp);
-}
 
 std::string machineId;
 UINT g_wmTaskbarCreated = 0;
-
-#define TIMER_LOG 0x1525
-#define WM_TRAYICON (WM_USER + 1)
-#define IDM_QUIT 1001
-#define IDM_OPENLOG 1002
-#define IDM_ABOUT 1003
-
-void AddTrayIcon(HWND hwnd, HINSTANCE hInstance) {
-    NOTIFYICONDATAW nid = {};
-    nid.cbSize = sizeof(NOTIFYICONDATAW);
-    nid.hWnd = hwnd;
-    nid.uID = 1;
-    nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
-    nid.uCallbackMessage = WM_TRAYICON;
-    nid.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ICON));
-    wcscpy_s(nid.szTip, L"batteryLogger");
-    Shell_NotifyIconW(NIM_ADD, &nid);
-}
-
-void RemoveTrayIcon(HWND hwnd) {
-    NOTIFYICONDATAW nid = {};
-    nid.cbSize = sizeof(NOTIFYICONDATAW);
-    nid.hWnd = hwnd;
-    nid.uID = 1;
-    Shell_NotifyIconW(NIM_DELETE, &nid);
-}
-
-void ShowContextMenu(HWND hwnd) {
-    POINT pt;
-    GetCursorPos(&pt);
-    HMENU hMenu = CreatePopupMenu();
-    AppendMenuW(hMenu, MF_STRING, IDM_ABOUT, L"About");
-    AppendMenuW(hMenu, MF_STRING, IDM_OPENLOG, L"Open battery log");
-    AppendMenuW(hMenu, MF_STRING, IDM_QUIT, L"Quit");
-
-    SetForegroundWindow(hwnd);
-
-    TrackPopupMenu(hMenu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, nullptr);
-    PostMessage(hwnd, WM_NULL, 0, 0);
-    DestroyMenu(hMenu);
-}
-
-HWND g_aboutDlg = nullptr;
-
-static INT_PTR CALLBACK AboutDlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
-    switch (uMsg) {
-        case WM_INITDIALOG: {
-            auto hInstance = (HINSTANCE) GetWindowLongPtr(hwnd, GWLP_HINSTANCE);
-            auto hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ICON));
-            SendMessage(hwnd, WM_SETICON, ICON_BIG, (LPARAM) hIcon);
-            SendMessage(hwnd, WM_SETICON, ICON_SMALL, (LPARAM) hIcon);
-            return TRUE;
-        }
-
-        case WM_CLOSE:
-            DestroyWindow(hwnd);
-            g_aboutDlg = nullptr;
-            return TRUE;
-
-        case WM_COMMAND: {
-            WORD id = LOWORD(wParam);
-            if (id == ID_ABOUTDLG_OK) {
-                DestroyWindow(hwnd);
-                g_aboutDlg = nullptr;
-                return TRUE;
-            }
-
-            if (id == ID_ABOUTDLG_GOTOREPO) {
-                ShellExecuteW(hwnd, L"open", L"https://github.com/phu54321/batteryLoggerCpp", nullptr, nullptr,
-                              SW_SHOWNORMAL);
-                return TRUE;
-            }
-            return TRUE;
-        }
-
-        default:
-            return FALSE;
-    }
-}
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     if (uMsg == g_wmTaskbarCreated) {
@@ -245,14 +90,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 }
 
                 case IDM_ABOUT:
-                    if (g_aboutDlg == nullptr) {
-                        auto hInstance = (HINSTANCE) GetWindowLongPtr(hwnd, GWLP_HINSTANCE);
-                        g_aboutDlg = CreateDialog(
-                            hInstance,
-                            MAKEINTRESOURCE(IDD_ABOUT),
-                            hwnd,
-                            AboutDlgProc);
-                    }
+                    showAboutDialog(hwnd);
                     break;
             }
             return 0;
@@ -309,7 +147,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     MSG msg = {};
     while (GetMessage(&msg, nullptr, 0, 0)) {
-        if (g_aboutDlg && IsDialogMessage(g_aboutDlg, &msg)) {
+        if (handleAboutDialogMessage(&msg)) {
             continue;
         }
         TranslateMessage(&msg);
