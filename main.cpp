@@ -25,7 +25,6 @@
 #include <chrono>
 #include <thread>
 #include <filesystem>
-#include <fstream>
 #include <iomanip>
 #include <sstream>
 #include <string>
@@ -35,6 +34,7 @@
 #include <memory>
 #include "resource.h"
 #include "utils/startupCheck.h"
+#include "utils/webLogReport.h"
 
 // Simple 32-bit FNV-1a hash for MAC bytes (non-cryptographic but enough
 // to avoid leaking the raw address directly).
@@ -156,113 +156,6 @@ std::wstring getLogPath() {
     std::wstring home = getHomeDir();
     std::wstring path = home + L"\\batteryLog.csv";
     return path;
-}
-
-std::wstring getTimestampForFilename() {
-    auto now = std::chrono::system_clock::now();
-    std::time_t tt = std::chrono::system_clock::to_time_t(now);
-    std::tm tmLocal{};
-    localtime_s(&tmLocal, &tt);
-
-    std::wstringstream ss;
-    ss << std::put_time(&tmLocal, L"%Y%m%d-%H%M%S");
-    return ss.str();
-}
-
-std::string readWholeFile(const std::filesystem::path &path) {
-    std::ifstream file(path, std::ios::binary);
-    if (!file) {
-        return {};
-    }
-
-    std::ostringstream ss;
-    ss << file.rdbuf();
-    return ss.str();
-}
-
-std::string loadTextResource(HINSTANCE hInstance, int resourceId) {
-    HRSRC resource = FindResourceW(hInstance, MAKEINTRESOURCEW(resourceId), RT_RCDATA);
-    if (!resource) {
-        return {};
-    }
-
-    HGLOBAL loadedResource = LoadResource(hInstance, resource);
-    if (!loadedResource) {
-        return {};
-    }
-
-    DWORD size = SizeofResource(hInstance, resource);
-    const auto *data = static_cast<const char *>(LockResource(loadedResource));
-    if (!data || size == 0) {
-        return {};
-    }
-
-    return std::string(data, data + size);
-}
-
-std::string escapeForRawTemplateLiteral(const std::string &text) {
-    std::string escaped;
-    escaped.reserve(text.size());
-
-    for (size_t i = 0; i < text.size(); ++i) {
-        char c = text[i];
-        if (c == '`') {
-            escaped += "\\`";
-        } else {
-            escaped += c;
-        }
-    }
-
-    return escaped;
-}
-
-bool replaceFirst(std::string &text, const std::string &needle, const std::string &replacement) {
-    size_t pos = text.find(needle);
-    if (pos == std::string::npos) {
-        return false;
-    }
-
-    text.replace(pos, needle.size(), replacement);
-    return true;
-}
-
-std::filesystem::path createWebLogReport(HINSTANCE hInstance) {
-    std::string html = loadTextResource(hInstance, IDR_WEBUI_HTML);
-    if (html.empty()) {
-        return {};
-    }
-
-    std::string csv = readWholeFile(getLogPath());
-    if (csv.empty()) {
-        return {};
-    }
-
-    const std::string marker = "<<<<<>>>>>";
-    const std::string replacement = "<<<<<" + escapeForRawTemplateLiteral(csv) + ">>>>>";
-    if (!replaceFirst(html, marker, replacement)) {
-        return {};
-    }
-
-    wchar_t tempPathBuffer[MAX_PATH + 1] = {};
-    DWORD tempPathLength = GetTempPathW(MAX_PATH + 1, tempPathBuffer);
-    if (tempPathLength == 0 || tempPathLength > MAX_PATH) {
-        return {};
-    }
-
-    std::filesystem::path outputPath = std::filesystem::path(tempPathBuffer) /
-                                       (L"batteryLog-" + getTimestampForFilename() + L".html");
-
-    std::ofstream output(outputPath, std::ios::binary);
-    if (!output) {
-        return {};
-    }
-
-    output.write(html.data(), static_cast<std::streamsize>(html.size()));
-    if (!output) {
-        return {};
-    }
-
-    return outputPath;
 }
 
 void logTask(const std::string &machineId) {
@@ -444,7 +337,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 case IDM_OPENLOG:
                 {
                     auto hInstance = (HINSTANCE) GetWindowLongPtr(hwnd, GWLP_HINSTANCE);
-                    std::filesystem::path reportPath = createWebLogReport(hInstance);
+                    std::wstring reportPath = createWebLogReport(hInstance, getLogPath());
                     if (reportPath.empty()) {
                         MessageBoxW(
                             hwnd,
