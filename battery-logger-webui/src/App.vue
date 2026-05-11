@@ -8,6 +8,9 @@ const embeddedCsv = embeddedCsvSlot.slice(5, embeddedCsvSlot.length - 5).trim()
 
 const csvText = ref(embeddedCsv)
 const loadError = ref('')
+const loadedFileName = ref('')
+const isDraggingFile = ref(false)
+let dragDepth = 0
 
 const rows = computed(() => parseBatteryLog(csvText.value))
 const machineIds = computed(() => Array.from(new Set(rows.value.map((row) => row.machineId))))
@@ -156,6 +159,58 @@ function activateSegment(segmentId: string) {
   activeSegmentId.value = segmentId
 }
 
+function resetDragState() {
+  dragDepth = 0
+  isDraggingFile.value = false
+}
+
+function handleDragEnter(event: DragEvent) {
+  event.preventDefault()
+  dragDepth += 1
+  isDraggingFile.value = true
+}
+
+function handleDragOver(event: DragEvent) {
+  event.preventDefault()
+
+  if (event.dataTransfer !== null) {
+    event.dataTransfer.dropEffect = 'copy'
+  }
+}
+
+function handleDragLeave(event: DragEvent) {
+  event.preventDefault()
+  dragDepth = Math.max(0, dragDepth - 1)
+
+  if (dragDepth === 0) {
+    isDraggingFile.value = false
+  }
+}
+
+async function handleDrop(event: DragEvent) {
+  event.preventDefault()
+  resetDragState()
+
+  const file = event.dataTransfer?.files.item(0)
+
+  if (file === undefined || file === null) {
+    return
+  }
+
+  if (!file.name.toLowerCase().endsWith('.csv')) {
+    loadError.value = 'Drop a CSV file exported by Battery Logger.'
+    return
+  }
+
+  try {
+    csvText.value = await file.text()
+    loadedFileName.value = file.name
+    loadError.value = ''
+  } catch (error) {
+    loadError.value = error instanceof Error ? error.message : String(error)
+  }
+}
+
 async function loadDevelopmentCsv() {
   const privateCsvPath = './assets/testdata/batteryLog.local.csv?raw'
   const sampleCsvPath = './assets/testdata/batteryLog.csv?raw'
@@ -163,6 +218,7 @@ async function loadDevelopmentCsv() {
   try {
     const privateCsv = await import(/* @vite-ignore */ privateCsvPath)
     csvText.value = privateCsv.default
+    loadedFileName.value = 'batteryLog.local.csv'
     return
   } catch {
     // The private file is intentionally optional and gitignored.
@@ -171,6 +227,7 @@ async function loadDevelopmentCsv() {
   try {
     const sampleCsv = await import(/* @vite-ignore */ sampleCsvPath)
     csvText.value = sampleCsv.default
+    loadedFileName.value = 'sample batteryLog.csv'
   } catch (error) {
     loadError.value = error instanceof Error ? error.message : String(error)
   }
@@ -201,7 +258,18 @@ watch(segments, () => {
 </script>
 
 <template>
-  <main class="app-shell">
+  <main
+    class="app-shell"
+    :class="{ 'app-shell-dragging': isDraggingFile }"
+    @dragenter="handleDragEnter"
+    @dragover="handleDragOver"
+    @dragleave="handleDragLeave"
+    @drop="handleDrop"
+  >
+    <div v-if="isDraggingFile" class="drop-overlay">
+      <div>Drop batteryLog.csv to load it</div>
+    </div>
+
     <header class="app-header">
       <div>
         <p class="eyebrow">Battery Logger</p>
@@ -222,6 +290,11 @@ watch(segments, () => {
         </div>
       </div>
     </header>
+
+    <section class="drop-hint" aria-label="CSV drag and drop">
+      <span>Drop a battery log CSV anywhere on this page</span>
+      <strong v-if="loadedFileName">{{ loadedFileName }}</strong>
+    </section>
 
     <section v-if="loadError" class="notice notice-error">
       {{ loadError }}
@@ -308,12 +381,32 @@ watch(segments, () => {
 
 <style scoped>
 .app-shell {
+  position: relative;
   min-height: 100vh;
   padding: 32px;
   background: #f6f7f9;
   color: #1c2530;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.app-shell-dragging {
+  background: #eef6f2;
+}
+
+.drop-overlay {
+  position: fixed;
+  inset: 16px;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  border: 2px dashed #15773b;
+  border-radius: 12px;
+  background: rgba(243, 251, 245, 0.82);
+  color: #145c31;
+  font-size: 24px;
+  font-weight: 800;
+  pointer-events: none;
 }
 
 .app-header {
@@ -369,12 +462,29 @@ h1 {
 }
 
 .notice,
-.table-wrap {
+.table-wrap,
+.drop-hint {
   max-width: 1120px;
   margin: 0 auto;
   border: 1px solid #d9dee7;
   border-radius: 8px;
   background: #ffffff;
+}
+
+.drop-hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+  padding: 12px 16px;
+  color: #687383;
+  font-size: 13px;
+}
+
+.drop-hint strong {
+  color: #1c2530;
+  font-weight: 750;
 }
 
 .notice {
@@ -508,6 +618,11 @@ tr:last-child td {
 
   .app-header {
     align-items: stretch;
+    flex-direction: column;
+  }
+
+  .drop-hint {
+    align-items: flex-start;
     flex-direction: column;
   }
 
