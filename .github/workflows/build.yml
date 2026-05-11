@@ -19,6 +19,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: battery-logger-webui/package-lock.json
+
+      - name: Install web UI dependencies
+        working-directory: battery-logger-webui
+        run: npm ci
+
+      - name: Build web UI
+        working-directory: battery-logger-webui
+        run: npm run build
+
       - name: Configure CMake
         # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
         # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
