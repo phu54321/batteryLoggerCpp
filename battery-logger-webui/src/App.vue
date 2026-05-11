@@ -37,6 +37,7 @@ const dischargingSegments = computed(() => segments.value.filter((segment) => !s
 
 const dischargeSleepThresholdMs = 5 * 60 * 1000
 const activeSegmentId = ref('')
+const segmentRowElements = new Map<string, HTMLElement>()
 
 function parseBatteryLog(csv: string): BatteryLogRow[] {
   return csv
@@ -162,8 +163,28 @@ function rateTone(segment: BatterySegment): string {
   return ''
 }
 
-function activateSegment(segmentId: string) {
+function setSegmentRowRef(segmentId: string, element: unknown) {
+  if (element instanceof HTMLElement) {
+    segmentRowElements.set(segmentId, element)
+    return
+  }
+
+  segmentRowElements.delete(segmentId)
+}
+
+function scrollSegmentRowIntoView(segmentId: string) {
+  segmentRowElements.get(segmentId)?.scrollIntoView({
+    behavior: 'smooth',
+    block: 'center',
+  })
+}
+
+function activateSegment(segmentId: string, shouldScrollTable = false) {
   activeSegmentId.value = segmentId
+
+  if (shouldScrollTable) {
+    scrollSegmentRowIntoView(segmentId)
+  }
 }
 
 function resetDragState() {
@@ -318,7 +339,7 @@ watch(segments, () => {
         :rows="machineRows"
         :segments="segments"
         :active-segment-id="activeSegmentId"
-        @activate-segment="activateSegment"
+        @activate-segment="(segmentId) => activateSegment(segmentId, true)"
       />
 
       <section class="table-wrap" aria-label="Battery segment table">
@@ -356,6 +377,7 @@ watch(segments, () => {
           <tr
             v-for="segment in segments"
             :key="segment.id"
+            :ref="(element) => setSegmentRowRef(segment.id, element)"
             :class="[
               segment.plugged ? 'segment-charging' : 'segment-discharging',
               { 'segment-active': segment.id === activeSegmentId },
