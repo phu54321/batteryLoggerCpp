@@ -21,88 +21,20 @@
 
 #include <windows.h>
 #include <shellapi.h>
-#include <iphlpapi.h>
 #include <chrono>
 #include <thread>
 #include <filesystem>
 #include <iomanip>
 #include <sstream>
 #include <string>
-#include <cstdint>
 #include <cstdlib>
 #include <atomic>
-#include <memory>
 #include "resource.h"
+#include "utils/batteryStatus.h"
+#include "utils/machineId.h"
+#include "utils/singleInstance.h"
 #include "utils/startupCheck.h"
 #include "utils/webLogReport.h"
-
-// Simple 32-bit FNV-1a hash for MAC bytes (non-cryptographic but enough
-// to avoid leaking the raw address directly).
-uint32_t fnv1a32(const unsigned char *data, size_t len) {
-    const uint32_t FNV_OFFSET_BASIS = 2166136261u;
-    const uint32_t FNV_PRIME = 16777619u;
-
-    uint32_t hash = FNV_OFFSET_BASIS;
-    for (size_t i = 0; i < len; ++i) {
-        hash ^= static_cast<uint32_t>(data[i]);
-        hash *= FNV_PRIME;
-    }
-    return hash;
-}
-
-// Get a stable machine id derived from the first non-zero MAC address,
-// hashed to 32 bits and truncated to 4 hex characters (similar idea to Python).
-std::string getMachineId() {
-    ULONG bufLen = 0;
-    if (GetAdaptersInfo(nullptr, &bufLen) != ERROR_BUFFER_OVERFLOW) {
-        // Fallback if we can't query adapters: just hash some constant.
-        uint32_t h = fnv1a32(reinterpret_cast<const unsigned char *>("fallback"), 8);
-        std::stringstream ss;
-        ss << std::uppercase << std::hex << std::setw(4) << std::setfill('0') << (h & 0xFFFFu);
-        return ss.str();
-    }
-
-    std::unique_ptr<BYTE[]> buffer(new BYTE[bufLen]);
-    auto *pAdapterInfo = reinterpret_cast<IP_ADAPTER_INFO *>(buffer.get());
-
-    if (GetAdaptersInfo(pAdapterInfo, &bufLen) != NO_ERROR) {
-        uint32_t h = fnv1a32(reinterpret_cast<const unsigned char *>("fallback2"), 9);
-        std::stringstream ss;
-        ss << std::uppercase << std::hex << std::setw(4) << std::setfill('0') << (h & 0xFFFFu);
-        return ss.str();
-    }
-
-    unsigned char mac[6] = {0};
-    bool found = false;
-    for (IP_ADAPTER_INFO *p = pAdapterInfo; p != nullptr; p = p->Next) {
-        if (p->AddressLength == 6) {
-            bool nonzero = false;
-            for (UINT i = 0; i < p->AddressLength; ++i) {
-                if (p->Address[i] != 0) {
-                    nonzero = true;
-                    break;
-                }
-            }
-            if (nonzero) {
-                memcpy(mac, p->Address, 6);
-                found = true;
-                break;
-            }
-        }
-    }
-
-    if (!found) {
-        uint32_t h = fnv1a32(reinterpret_cast<const unsigned char *>("fallback3"), 9);
-        std::stringstream ss;
-        ss << std::uppercase << std::hex << std::setw(4) << std::setfill('0') << (h & 0xFFFFu);
-        return ss.str();
-    }
-
-    uint32_t hash = fnv1a32(mac, 6);
-    std::stringstream ss;
-    ss << std::uppercase << std::hex << std::setw(4) << std::setfill('0') << (hash & 0xFFFFu);
-    return ss.str();
-}
 
 // Get ISO-8601-like local time string (YYYY-MM-DDTHH:MM:SS)
 std::string getCurrentIsoTime() {
@@ -123,23 +55,6 @@ void getAppWithMaxCpuUsage(std::string &exeName, double &cpuUsage) {
     cpuUsage = 0.0;
     // If you ever want this enabled, you'll need to sample process CPU times
     // via GetProcessTimes / PDH, similar to psutil's behavior.
-}
-
-// Get battery status via WinAPI
-bool getBatteryStatus(bool &plugged, int &percent) {
-    SYSTEM_POWER_STATUS sps{};
-    if (!GetSystemPowerStatus(&sps)) {
-        return false;
-    }
-
-    plugged = (sps.ACLineStatus == 1);
-    if (sps.BatteryLifePercent == 255) {
-        // unknown
-        percent = -1;
-    } else {
-        percent = static_cast<int>(sps.BatteryLifePercent);
-    }
-    return true;
 }
 
 // Expand "~" to user home directory (rough equivalent of os.path.expanduser("~"))
@@ -190,29 +105,6 @@ void logTask(const std::string &machineId) {
     );
 
     fclose(fp);
-}
-
-// Single-instance guard using a named mutex (similar to tendo.singleton)
-bool ensureSingleInstance() {
-    // Change the name to something unique to your app if you want.
-    HANDLE hMutex = CreateMutexW(
-        nullptr,
-        FALSE,
-        L"Global\\BatteryLoggerSingleInstanceMutex"
-    );
-
-    if (!hMutex) {
-        return false;
-    }
-
-    if (GetLastError() == ERROR_ALREADY_EXISTS) {
-        // Another instance already running.
-        CloseHandle(hMutex);
-        return false;
-    }
-
-    // Keep hMutex alive for the duration of the process.
-    return true;
 }
 
 std::string machineId;
