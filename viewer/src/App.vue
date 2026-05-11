@@ -406,7 +406,11 @@ watch(
             <td>{{ formatDuration(segment) }}</td>
             <td>{{ segment.startPercent }}%</td>
             <td>{{ segment.endPercent }}%</td>
-            <td>{{ formatPercentChange(segment) }}</td>
+            <td>
+              <span class="change-value" :class="rateTone(segment)">
+                {{ formatPercentChange(segment) }}
+              </span>
+            </td>
             <td>
               <span class="rate-value" :class="rateTone(segment)">
                 {{ formatRate(segment) }}
@@ -640,6 +644,7 @@ tr:last-child td {
   font-weight: 700;
 }
 
+.change-value,
 .rate-value {
   font-weight: 750;
 }
