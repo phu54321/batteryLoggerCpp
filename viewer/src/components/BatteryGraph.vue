@@ -103,7 +103,7 @@ function measureViewport() {
   viewportWidth.value = Math.max(320, graphScroller.value.clientWidth)
 }
 
-function scrollActiveSegmentIntoView() {
+function scrollActiveSegmentIntoView(behavior: ScrollBehavior = 'smooth') {
   const scroller = graphScroller.value
   const activeSegment = props.segments.find((segment) => segment.id === props.activeSegmentId)
 
@@ -116,7 +116,7 @@ function scrollActiveSegmentIntoView() {
 
   scroller.scrollTo({
     left: scrollLeft,
-    behavior: 'smooth',
+    behavior,
   })
 }
 
@@ -158,6 +158,8 @@ onMounted(() => {
     resizeObserver = new ResizeObserver(measureViewport)
     resizeObserver.observe(graphScroller.value)
   }
+
+  nextTick(() => scrollActiveSegmentIntoView('auto'))
 })
 
 onBeforeUnmount(() => {

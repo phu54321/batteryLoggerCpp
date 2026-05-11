@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import BatteryGraph from '@/components/BatteryGraph.vue'
 import type { BatteryLogRow, BatterySegment } from '@/types/battery'
 
@@ -172,9 +172,9 @@ function setSegmentRowRef(segmentId: string, element: unknown) {
   segmentRowElements.delete(segmentId)
 }
 
-function scrollSegmentRowIntoView(segmentId: string) {
+function scrollSegmentRowIntoView(segmentId: string, behavior: ScrollBehavior = 'smooth') {
   segmentRowElements.get(segmentId)?.scrollIntoView({
-    behavior: 'smooth',
+    behavior,
     block: 'center',
   })
 }
@@ -184,6 +184,14 @@ function activateSegment(segmentId: string, shouldScrollTable = false) {
 
   if (shouldScrollTable) {
     scrollSegmentRowIntoView(segmentId)
+  }
+}
+
+function activateLatestSegment(shouldScrollTable = false) {
+  activeSegmentId.value = segments.value.at(-1)?.id ?? ''
+
+  if (shouldScrollTable && activeSegmentId.value) {
+    nextTick(() => scrollSegmentRowIntoView(activeSegmentId.value, 'auto'))
   }
 }
 
@@ -280,9 +288,13 @@ watch(
   { immediate: true },
 )
 
-watch(segments, () => {
-  activeSegmentId.value = segments.value[0]?.id ?? ''
-})
+watch(
+  segments,
+  () => {
+    activateLatestSegment(true)
+  },
+  { immediate: true, flush: 'post' },
+)
 </script>
 
 <template>
